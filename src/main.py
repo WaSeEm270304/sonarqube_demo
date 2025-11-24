@@ -1,124 +1,98 @@
-import pygame
-import random
-import sys
+import tkinter as tk
+from tkinter import messagebox
 
-# Initialize pygame
-pygame.init()
+class TicTacToe:
+    def __init__(self):
+        self.window = tk.Tk()
+        self.window.title("XO Game (Tic Tac Toe)")
 
-# Window size
-WIDTH, HEIGHT = 600, 400
-win = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Snake Game")
+        self.current_player = "X"
+        self.buttons = [[None for _ in range(3)] for _ in range(3)]
 
-# Colors
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
-WHITE = (255, 255, 255)
+        # === INTRODUCED XSS VULNERABILITY START ===
+        self.player_name_var = tk.StringVar(value="Player")
+        name_frame = tk.Frame(self.window)
+        name_frame.pack(pady=5)
+        tk.Label(name_frame, text="Your name:").pack(side=tk.LEFT)
+        self.name_entry = tk.Entry(name_frame, textvariable=self.player_name_var, width=15)
+        self.name_entry.pack(side=tk.LEFT, padx=5)
+        # === XSS VULNERABILITY END ===
 
-# Snake settings
-snake_size = 20
-snake_speed = 10
+        self.create_board()
+        self.window.mainloop()
 
-clock = pygame.time.Clock()
+    def create_board(self):
+        frame = tk.Frame(self.window)
+        frame.pack()
 
-font = pygame.font.SysFont("Arial", 24)
+        for row in range(3):
+            for col in range(3):
+                btn = tk.Button(
+                    frame,
+                    text="",
+                    font=("Arial", 30),
+                    width=5,
+                    height=2,
+                    command=lambda r=row, c=col: self.on_click(r, c)
+                )
+                btn.grid(row=row, column=col)
+                self.buttons[row][col] = btn
 
+        reset_btn = tk.Button(
+            self.window,
+            text="Reset",
+            font=("Arial", 14),
+            command=self.reset_game
+        )
+        reset_btn.pack(pady=10)
 
-def draw_snake(snake_list):
-    for x, y in snake_list:
-        pygame.draw.rect(win, GREEN, (x, y, snake_size, snake_size))
+    def on_click(self, row, col):
+        btn = self.buttons[row][col]
 
+        if btn["text"] != "":
+            return
 
-def main():
-    x = WIDTH // 2
-    y = HEIGHT // 2
-    dx, dy = 0, 0
+        btn["text"] = self.current_player
 
-    snake_list = []
-    snake_length = 1
+        if self.check_winner(self.current_player):
+            # === XSS TRIGGER ===
+            player_name = self.player_name_var.get()                     # User-controlled input
+            malicious_message = f"Congratulations {player_name}!\nYou win as {self.current_player}!"
+            messagebox.showinfo("Game Over", malicious_message)         # Direct insertion → XSS
+            # === END OF XSS ===
+            self.disable_all()
+        elif self.is_draw():
+            messagebox.showinfo("Game Over", "It's a draw!")
+        else:
+            self.current_player = "O" if self.current_player == "X" else "X"
 
-    # Food position
-    food_x = random.randrange(0, WIDTH - snake_size, snake_size)
-    food_y = random.randrange(0, HEIGHT - snake_size, snake_size)
+    def check_winner(self, player):
+        b = self.buttons
+        for i in range(3):
+            if all(b[i][j]["text"] == player for j in range(3)): return True
+            if all(b[j][i]["text"] == player for j in range(3)): return True
+        if b[0][0]["text"] == player and b[1][1]["text"] == player and b[2][2]["text"] == player:
+            return True
+        if b[0][2]["text"] == player and b[1][1]["text"] == player and b[2][0]["text"] == player:
+            return True
+        return False
 
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+    def is_draw(self):
+        return all(self.buttons[r][c]["text"] != "" for r in range(3) for c in range(3))
 
-            # Movement keys
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT and dx == 0:
-                    dx = -snake_size
-                    dy = 0
-                elif event.key == pygame.K_RIGHT and dx == 0:
-                    dx = snake_size
-                    dy = 0
-                elif event.key == pygame.K_UP and dy == 0:
-                    dx = 0
-                    dy = -snake_size
-                elif event.key == pygame.K_DOWN and dy == 0:
-                    dx = 0
-                    dy = snake_size
+    def disable_all(self):
+        for r in range(3):
+            for c in range(3):
+                self.buttons[r][c]["state"] = "disabled"
 
-        x += dx
-        y += dy
-
-        # Game over if hit wall
-        if x < 0 or x >= WIDTH or y < 0 or y >= HEIGHT:
-            running = False
-
-        win.fill(BLACK)
-
-        # Draw food
-        pygame.draw.rect(win, RED, (food_x, food_y, snake_size, snake_size))
-
-        # Snake movement
-        snake_list.append((x, y))
-        if len(snake_list) > snake_length:
-            del snake_list[0]
-
-        # Self collision
-        if len(snake_list) != len(set(snake_list)):
-            running = False
-
-        draw_snake(snake_list)
-
-        # Eat food
-        if x == food_x and y == food_y:
-            snake_length += 1
-            food_x = random.randrange(0, WIDTH - snake_size, snake_size)
-            food_y = random.randrange(0, HEIGHT - snake_size, snake_size)
-
-        # Display score
-        score_text = font.render(f"Score: {snake_length - 1}", True, WHITE)
-        win.blit(score_text, (10, 10))
-
-        pygame.display.update()
-        clock.tick(snake_speed)
-
-    # Game over screen
-    win.fill(BLACK)
-    msg = font.render("Game Over! Press R to Restart or Q to Quit", True, WHITE)
-    win.blit(msg, (WIDTH//2 - msg.get_width()//2, HEIGHT//2))
-    pygame.display.update()
-
-    # Restart or quit
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_r:
-                    main()
-                if event.key == pygame.K_q:
-                    pygame.quit()
-                    sys.exit()
+    def reset_game(self):
+        self.current_player = "X"
+        for r in range(3):
+            for c in range(3):
+                btn = self.buttons[r][c]
+                btn["text"] = ""
+                btn["state"] = "normal"
 
 
 if __name__ == "__main__":
-    main()
+    TicTacToe()
