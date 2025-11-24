@@ -1,4 +1,4 @@
-name: Build
+name: CI
 
 on:
   push:
@@ -8,43 +8,73 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  sonarqube:
-    name: Unit Tests + SonarQube
+  test-and-sonarqube:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
+      # 1. Checkout repository
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # Required for SonarQube scan
 
-      # Step 2: Setup Python
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      # 2. Set up Python
+      - uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: 3.11
 
-      # Step 3: Install dependencies
-      - name: Install Dependencies
-        run: |
+      # 3. Install Python dependencies
+      - run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install coverage
+          pip install fastapi uvicorn pytest pytest-cov httpx
 
-      # Step 4: Run Unit Tests with Coverage
-      - name: Run Unit Tests with Coverage
-        run: |
-          coverage run -m unittest discover -s src -p "test*.py"
-          coverage xml
+      # 4. Set PYTHONPATH
+      - run: echo "PYTHONPATH=$(pwd)/src:$PYTHONPATH" >> $GITHUB_ENV
 
-      # Step 5: SonarQube Scan
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v6
+      # 5. Run pytest with coverage
+      - run: pytest --cov=src --cov-branch --cov-report=xml
+
+      # Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
         with:
-          args: >
-            -Dsonar.projectKey=WaSeEm270304_sonarqube_demo
-            -Dsonar.organization=waseem270304
-            -Dsonar.sources=src
-            -Dsonar.python.coverage.reportPaths=coverage.xml
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Build Docker image
+      - run: docker build -t fastapi-calculator .
+
+      # 7. Run Docker container on shared network
+      - run: |
+          docker network create zapnet
+          docker run -d --network zapnet --name fastapi-app fastapi-calculator
+          sleep 20  # wait for app to start
+
+      # 8. Run OWASP ZAP baseline scan
+      - run: |
+          mkdir zap-output
+          chmod 777 zap-output 
+          docker run --rm --network zapnet \
+          -v $(pwd)/zap-output:/zap/wrk \
+          ghcr.io/zaproxy/zaproxy:stable \
+          /zap/zap-baseline.py \
+          -t http://fastapi-app:8000 \
+          --autooff \
+          -I \
+          -x zap-report.xml \
+          -r zap-report.html \
+          -J zap-report.json \
+          -w zap-warnings.md
+
+
+
+
+      # 9. Upload ZAP report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-output/*
+
+
+      # 10. SonarQube scan
+      - uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_SCANNER_OPTS: -Dsonar.python.coverage.reportPaths=./coverage.xml
