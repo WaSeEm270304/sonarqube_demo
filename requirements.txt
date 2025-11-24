@@ -1,6 +1,5 @@
-
-# Testing framework
+fastapi
+uvicorn
 pytest
 pytest-cov
-
-coverage
+httpx
